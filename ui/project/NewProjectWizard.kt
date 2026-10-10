@@ -14,7 +14,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.gufont.app.data.model.*
+import androidx.compose.ui.unit.sp
+import com.gufont.app.data.model.BookInfo
+import com.gufont.app.data.model.Project
 import com.gufont.app.data.storage.ProjectStorage
 import com.gufont.app.util.SafUtils
 import kotlinx.coroutines.launch
@@ -61,42 +63,56 @@ fun NewProjectWizard(
                 }
             )
         }
-    ) { p ->
+    ) { pad ->
         Column(
             Modifier
-                .padding(p)
+                .padding(pad)
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Text("保存位置", fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary)
+            SectionLabel("保存位置")
             OutlinedButton(
                 onClick = { pickDir.launch(null) },
                 modifier = Modifier.fillMaxWidth()
-            ) { Text(rootUri?.lastPathSegment ?: "选择文件夹") }
+            ) {
+                Text(rootUri?.lastPathSegment ?: "选择文件夹")
+            }
 
-            Text("书籍信息", fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary)
+            SectionLabel("书籍信息")
             Field("书名", bookTitle, { bookTitle = it }, "例：老子")
             Field("注者", annotator, { annotator = it }, "可留空")
             Field("版本", edition, { edition = it }, "可留空")
 
-            Text("编码缩写（拼音首字母）", fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary)
+            SectionLabel("编码缩写（拼音首字母）")
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Field("书名", bookAbbr, { bookAbbr = it.uppercase().take(4) }, "LZ",
-                    Modifier.weight(1f))
-                Field("注者", annotatorAbbr, { annotatorAbbr = it.uppercase().take(2) }, "WB",
-                    Modifier.weight(1f))
-                Field("版本", editionAbbr, { editionAbbr = it.uppercase().take(2) }, "S",
-                    Modifier.weight(1f))
+                Field(
+                    "书名", bookAbbr,
+                    { bookAbbr = it.uppercase().take(4) },
+                    "LZ", Modifier.weight(1f)
+                )
+                Field(
+                    "注者", annotatorAbbr,
+                    { annotatorAbbr = it.uppercase().take(2) },
+                    "WB", Modifier.weight(1f)
+                )
+                Field(
+                    "版本", editionAbbr,
+                    { editionAbbr = it.uppercase().take(2) },
+                    "S", Modifier.weight(1f)
+                )
             }
 
             Text(
-                "编码示例：${bookAbbr.ifBlank { "LZ" }}${annotatorAbbr.ifBlank { "WB" }}${editionAbbr.ifBlank { "S" }}_p003_c02_r08",
-                fontSize = 12.dp.let { 12.sp() },
+                "编码示例：${
+                    bookAbbr.ifBlank { "LZ" }
+                }${
+                    annotatorAbbr.ifBlank { "WB" }
+                }${
+                    editionAbbr.ifBlank { "S" }
+                }_p003_c02_r08",
+                fontSize = 12.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
 
@@ -105,6 +121,7 @@ fun NewProjectWizard(
             }
 
             Spacer(Modifier.height(12.dp))
+
             Button(
                 onClick = {
                     val uri = rootUri ?: return@Button
@@ -141,7 +158,10 @@ fun NewProjectWizard(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 if (working) {
-                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                    CircularProgressIndicator(
+                        Modifier.size(18.dp),
+                        strokeWidth = 2.dp
+                    )
                     Spacer(Modifier.width(8.dp))
                 }
                 Text(if (working) "创建中…" else "创建")
@@ -150,10 +170,15 @@ fun NewProjectWizard(
     }
 }
 
-private fun Int.sp() = androidx.compose.ui.unit.TextUnit(
-    this.toFloat(),
-    androidx.compose.ui.unit.TextUnitType.Sp
-)
+@Composable
+private fun SectionLabel(text: String) {
+    Text(
+        text,
+        fontWeight = FontWeight.Bold,
+        color = MaterialTheme.colorScheme.primary,
+        fontSize = 14.sp
+    )
+}
 
 @Composable
 private fun Field(
