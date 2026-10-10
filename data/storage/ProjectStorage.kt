@@ -71,12 +71,16 @@ class ProjectStorage(
     suspend fun listPages(): List<Page> = withContext(Dispatchers.IO) {
         val dir = root.findFile("pages") ?: return@withContext emptyList()
         dir.listFiles()
-            .filter { it.name?.startsWith("page_") == true && it.name?.endsWith(".json") == true }
+            .filter {
+                it.name?.startsWith("page_") == true &&
+                        it.name?.endsWith(".json") == true
+            }
             .sortedBy { it.name }
             .mapNotNull {
                 try {
                     val t = context.contentResolver.openInputStream(it.uri)
-                        ?.use { s -> s.readBytes().toString(Charsets.UTF_8) } ?: return@mapNotNull null
+                        ?.use { s -> s.readBytes().toString(Charsets.UTF_8) }
+                        ?: return@mapNotNull null
                     JsonIO.json.decodeFromString<Page>(t)
                 } catch (_: Exception) { null }
             }
@@ -103,11 +107,24 @@ class ProjectStorage(
 
     // ---------- 文件 ----------
 
+    /** 写图片（PNG/JPG 等，统一用 image/png MIME） */
     suspend fun writeImage(dirName: String, fileName: String, bytes: ByteArray) =
         withContext(Dispatchers.IO) {
             val dir = ensureDir(dirName) ?: error("无法创建 $dirName")
             dir.findFile(fileName)?.delete()
-            val f = dir.createFile("image/png", fileName) ?: error("无法创建 $fileName")
+            val f = dir.createFile("image/png", fileName)
+                ?: error("无法创建 $fileName")
+            context.contentResolver.openOutputStream(f.uri, "w")?.use { it.write(bytes) }
+                ?: error("无法写入 $fileName")
+        }
+
+    /** 写任意二进制文件（TTF 等） */
+    suspend fun writeBytes(dirName: String, fileName: String, bytes: ByteArray) =
+        withContext(Dispatchers.IO) {
+            val dir = ensureDir(dirName) ?: error("无法创建 $dirName")
+            dir.findFile(fileName)?.delete()
+            val f = dir.createFile("application/octet-stream", fileName)
+                ?: error("无法创建 $fileName")
             context.contentResolver.openOutputStream(f.uri, "w")?.use { it.write(bytes) }
                 ?: error("无法写入 $fileName")
         }
@@ -115,7 +132,15 @@ class ProjectStorage(
     fun openFileUri(dirName: String, fileName: String): Uri? =
         root.findFile(dirName)?.findFile(fileName)?.uri
 
-    // ---------- 工具 ----------
+    /** 删除子目录里的文件 */
+    suspend fun deleteFile(dirName: String, fileName: String) =
+        withContext(Dispatchers.IO) {
+            try {
+                root.findFile(dirName)?.findFile(fileName)?.delete()
+            } catch (_: Exception) { }
+        }
+
+    // ---------- 内部工具 ----------
 
     private fun ensureDir(name: String): DocumentFile? {
         val r = root
@@ -126,7 +151,8 @@ class ProjectStorage(
     private fun writeText(fileName: String, text: String) {
         val r = root
         r.findFile(fileName)?.delete()
-        val f = r.createFile("application/json", fileName) ?: error("无法创建 $fileName")
+        val f = r.createFile("application/json", fileName)
+            ?: error("无法创建 $fileName")
         context.contentResolver.openOutputStream(f.uri, "w")?.use {
             it.write(text.toByteArray(Charsets.UTF_8))
         } ?: error("无法写入 $fileName")
@@ -134,7 +160,8 @@ class ProjectStorage(
 
     private fun writeTextIn(dir: DocumentFile, fileName: String, text: String) {
         dir.findFile(fileName)?.delete()
-        val f = dir.createFile("application/json", fileName) ?: error("无法创建 $fileName")
+        val f = dir.createFile("application/json", fileName)
+            ?: error("无法创建 $fileName")
         context.contentResolver.openOutputStream(f.uri, "w")?.use {
             it.write(text.toByteArray(Charsets.UTF_8))
         } ?: error("无法写入 $fileName")
