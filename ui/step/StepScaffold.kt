@@ -3,7 +3,7 @@ package com.gufont.app.ui.step
 import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.material3.*
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -13,7 +13,16 @@ import com.gufont.app.data.storage.ProjectStorage
 import com.gufont.app.ui.components.AppBottomBar
 import com.gufont.app.ui.components.AppTopBar
 import com.gufont.app.ui.components.HamburgerMenu
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
+/**
+ * 所有步骤页共用骨架：
+ *   AppTopBar(☰ 文件 重置 预览)
+ *   内容区
+ *   底栏（可自定义，默认禁用三个按钮）
+ *   汉堡菜单
+ */
 @Composable
 fun StepScaffold(
     rootUri: String,
@@ -24,11 +33,11 @@ fun StepScaffold(
     onPreview: () -> Unit = {},
     resetEnabled: Boolean = true,
     previewEnabled: Boolean = true,
-    /** 自定义底栏；null 表示用默认的禁用三按钮 */
     bottomBar: (@Composable () -> Unit)? = null,
     content: @Composable (Project?, (Project) -> Unit) -> Unit
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     var project by remember { mutableStateOf<Project?>(null) }
     var showMenu by remember { mutableStateOf(false) }
 
@@ -40,13 +49,10 @@ fun StepScaffold(
 
     val saveProject: (Project) -> Unit = { p ->
         project = p
-        // 异步保存；不阻塞 UI
-        val ctx = context
-        kotlinx.coroutines.GlobalScope.launch(
-            kotlinx.coroutines.Dispatchers.IO
-        ) {
-            try { ProjectStorage(ctx, Uri.parse(rootUri)).saveProject(p) }
-            catch (_: Exception) { }
+        scope.launch(Dispatchers.IO) {
+            try {
+                ProjectStorage(context, Uri.parse(rootUri)).saveProject(p)
+            } catch (_: Exception) { }
         }
     }
 
@@ -92,12 +98,4 @@ fun StepScaffold(
             }
         )
     }
-}
-
-// 小工具
-private fun kotlinx.coroutines.CoroutineScope.launch(
-    dispatcher: kotlin.coroutines.CoroutineContext,
-    block: suspend () -> Unit
-) = kotlinx.coroutines.CoroutineScope(dispatcher).let {
-    kotlinx.coroutines.launch(context = dispatcher, block = block)
 }
