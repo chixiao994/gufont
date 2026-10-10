@@ -20,6 +20,7 @@ import androidx.compose.ui.unit.sp
 import com.gufont.app.data.json.JsonIO
 import com.gufont.app.util.SafUtils
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.decodeFromString
 
 @Serializable
 data class RecentProject(
@@ -42,9 +43,13 @@ fun ProjectListScreen(
     var recent by remember { mutableStateOf<List<RecentProject>>(emptyList()) }
 
     LaunchedEffect(Unit) {
-        val prefs = context.getSharedPreferences("gufont_recent", 0)
-        val raw = prefs.getString("list", "[]") ?: "[]"
-        recent = try { JsonIO.json.decodeFromString(raw) } catch (_: Exception) { emptyList() }
+        try {
+            val prefs = context.getSharedPreferences("gufont_recent", 0)
+            val raw = prefs.getString("list", "[]") ?: "[]"
+            recent = JsonIO.json.decodeFromString<List<RecentProject>>(raw)
+        } catch (_: Exception) {
+            recent = emptyList()
+        }
     }
 
     val pickExisting = rememberLauncherForActivityResult(
