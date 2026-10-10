@@ -1,0 +1,2 @@
+-keep class com.gufont.app.data.model.** { *; }
+-keepattributes *Annotation*, InnerClasses
