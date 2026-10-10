@@ -6,7 +6,6 @@ import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -15,7 +14,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -24,12 +22,11 @@ import com.gufont.app.data.model.*
 import com.gufont.app.data.storage.ProjectStorage
 import com.gufont.app.engine.image.BitmapIO
 import com.gufont.app.engine.pipeline.FontProjectManager
-import com.gufont.app.engine.potrace.PotraceParams
-import com.gufont.app.engine.potrace.Potrace
 import com.gufont.app.ui.components.AppBottomBar
 import com.gufont.app.ui.step.components.BrushCanvas
-import com.gufont.app.ui.step.components.VectorOverlay
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
@@ -49,73 +46,78 @@ fun StepEditScreen(rootUri: String, onBack: () -> Unit, onGoStep: (Int) -> Unit)
     var bitmap by remember { mutableStateOf<Bitmap?>(null) }
     var bitmapVersion by remember { mutableIntStateOf(0) }
     var modified by remember { mutableStateOf(false) }
-    var eraser by remember { mutableStateOf(true) }  // 默认擦除
+    var eraser by remember { mutableStateOf(true) }
     var brushSizeDp by remember { mutableStateOf(16f) }
 
-    // 命名
     var nameText by remember { mutableStateOf("") }
 
-    // 二值化参数
     var binMode by remember { mutableStateOf("otsu") }
     var binThreshold by remember { mutableFloatStateOf(128f) }
     var binInvert by remember { mutableStateOf(false) }
 
-    // 参数栏 Tab
-    var paramTab by remember { mutableStateOf(0) }  // 0=笔刷 1=二值化
+    var paramTab by remember { mutableStateOf(0) }
 
-    // 预览
     var showPreview by remember { mutableStateOf(false) }
     var showBinDialog by remember { mutableStateOf(false) }
 
-    // 加载
+    // debounce 用
+    var rebuildJob by remember { mutableStateOf<Job?>(null) }
+
+    // 加载项目
     LaunchedEffect(rootUri) {
         try {
             val p = storage.loadProject()
             project = p
             val gi = storage.loadGlyphIndex()
-            glyphs = gi.glyphs.filter { it.state != GlyphState.SKIPPED }
+            glyphs = gi.glyphs
+                .filter { it.state != GlyphState.SKIPPED }
                 .sortedBy { it.code }
             index = 0
-            // 首次进入，弹二值化确认
-            if (!p.steps[Step.EDIT.id]?.completed!! || gi.glyphs.none { it.state == GlyphState.EDITED || it.state == GlyphState.IN_FONT }) {
-                showBinDialog = true
+            // 首次进入（未编辑过任何字）弹二值化默认参数
+            val neverEdited = gi.glyphs.none {
+                it.state == GlyphState.EDITED ||
+                        it.state == GlyphState.IN_FONT
             }
+            if (neverEdited) showBinDialog = true
         } catch (_: Exception) { }
     }
 
     // 加载当前字
     LaunchedEffect(glyphs, index) {
         val g = glyphs.getOrNull(index) ?: return@LaunchedEffect
-        bitmap?.recycle(); bitmap = null
+        bitmap?.recycle()
+        bitmap = null
         withContext(Dispatchers.IO) {
             val fileName = g.edited ?: g.raw
             val uri = storage.openFileUri("glyphs", fileName) ?: return@withContext
             val bytes = try {
-                context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                context.contentResolver.openInputStream(uri)
+                    ?.use { it.readBytes() }
             } catch (_: Exception) { null } ?: return@withContext
-            val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return@withContext
+            val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                ?: return@withContext
             bitmap = bmp.copy(Bitmap.Config.ARGB_8888, true)
         }
         modified = false
         nameText = if (g.codepoint > 0) {
-            try { String(Character.toChars(g.codepoint)) } catch (_: Exception) { "" }
+            try {
+                String(Character.toChars(g.codepoint))
+            } catch (_: Exception) { "" }
         } else ""
-        // 二值化参数
         val bin = g.binaryOverride ?: project?.settings?.toBinarySettings()
         binMode = bin?.mode ?: "otsu"
         binThreshold = (bin?.threshold ?: 128).toFloat()
         binInvert = bin?.invert ?: false
     }
 
-    // 解析命名
     fun parseCodepoint(s: String): Int {
         if (s.isEmpty()) return 0
-        // 单字符
-        if (s.length == 1 || (s.length == 2 && Character.isHighSurrogate(s[0]))) {
+        if (s.length == 1 ||
+            (s.length == 2 && Character.isHighSurrogate(s[0]))
+        ) {
             val cp = s.codePointAt(0)
             if (cp > 0x20 && cp != 0x7F) return cp
         }
-        // U+XXXX / 0xXXXX / XXXX
         val hex = s.removePrefix("U+").removePrefix("u+")
             .removePrefix("0x").removePrefix("0X")
         hex.toIntOrNull(16)?.let { if (it in 1..0x10FFFF) return it }
@@ -126,12 +128,13 @@ fun StepEditScreen(rootUri: String, onBack: () -> Unit, onGoStep: (Int) -> Unit)
         val g = glyphs.getOrNull(index) ?: return false
         val bmp = bitmap ?: return false
         val proj = project ?: return false
-        val now = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US).format(Date())
+        val now = SimpleDateFormat(
+            "yyyy-MM-dd'T'HH:mm:ss", Locale.US
+        ).format(Date())
 
         val editedName = "${g.code}_edited.png"
         val bin = BinarySettings(binMode, binThreshold.toInt(), binInvert)
 
-        // 判定是否真的改了
         val newCp = parseCodepoint(nameText)
         val changedBitmap = modified
         val changedBin = bin != (g.binaryOverride ?: proj.settings.toBinarySettings())
@@ -155,43 +158,54 @@ fun StepEditScreen(rootUri: String, onBack: () -> Unit, onGoStep: (Int) -> Unit)
             updated = now
         )
 
-        // 更新 glyphs.json
         val gi = storage.loadGlyphIndex()
         val updated = gi.glyphs.map { if (it.code == g.code) newGlyph else it }
         storage.saveGlyphIndex(GlyphIndex(updated))
 
-        // 更新内存
         glyphs = glyphs.toMutableList().also { it[index] = newGlyph }
 
-        // 后台重建字体
-        val projNow = storage.loadProject()
-        val (ok, issues) = FontProjectManager.rebuildFont(context, storage, projNow)
-        // 更新进度
-        val proj2 = storage.loadProject()
-        val newSteps = proj2.steps.toMutableMap()
-        newSteps[Step.EDIT.id] = StepState(
-            completed = false,
-            done = updated.count { it.state == GlyphState.EDITED || it.state == GlyphState.IN_FONT },
-            total = updated.size
-        )
-        storage.saveProject(proj2.copy(steps = newSteps))
-        project = proj2
-
+        // debounce 后台重建字体（500ms）
+        rebuildJob?.cancel()
+        rebuildJob = scope.launch {
+            delay(500)
+            try {
+                val projNow = storage.loadProject()
+                FontProjectManager.rebuildFont(context, storage, projNow)
+                val proj2 = storage.loadProject()
+                val newSteps = proj2.steps.toMutableMap()
+                newSteps[Step.EDIT.id] = StepState(
+                    completed = false,
+                    done = updated.count {
+                        it.state == GlyphState.EDITED ||
+                                it.state == GlyphState.IN_FONT
+                    },
+                    total = updated.size
+                )
+                storage.saveProject(proj2.copy(steps = newSteps))
+                project = proj2
+            } catch (_: Exception) { }
+        }
         return true
     }
 
     fun goTo(target: Int) {
         if (target < 0) return
         if (target >= glyphs.size) {
-            // 完成
             scope.launch {
                 try { saveCurrent() } catch (_: Exception) { }
-                val proj = storage.loadProject()
-                val newSteps = proj.steps.toMutableMap()
-                newSteps[Step.EDIT.id] = StepState(
-                    completed = true, done = glyphs.size, total = glyphs.size
-                )
-                storage.saveProject(proj.copy(steps = newSteps))
+                rebuildJob?.cancel()
+                try {
+                    val proj = storage.loadProject()
+                    FontProjectManager.rebuildFont(context, storage, proj)
+                    val proj2 = storage.loadProject()
+                    val newSteps = proj2.steps.toMutableMap()
+                    newSteps[Step.EDIT.id] = StepState(
+                        completed = true,
+                        done = glyphs.size,
+                        total = glyphs.size
+                    )
+                    storage.saveProject(proj2.copy(steps = newSteps))
+                } catch (_: Exception) { }
                 onGoStep(Step.INSTALL.id)
             }
             return
@@ -213,9 +227,11 @@ fun StepEditScreen(rootUri: String, onBack: () -> Unit, onGoStep: (Int) -> Unit)
             scope.launch {
                 val g = glyphs.getOrNull(index) ?: return@launch
                 withContext(Dispatchers.IO) {
-                    val uri = storage.openFileUri("glyphs", g.raw) ?: return@withContext
+                    val uri = storage.openFileUri("glyphs", g.raw)
+                        ?: return@withContext
                     val bytes = try {
-                        context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                        context.contentResolver.openInputStream(uri)
+                            ?.use { it.readBytes() }
                     } catch (_: Exception) { null } ?: return@withContext
                     val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
                         ?: return@withContext
@@ -227,12 +243,12 @@ fun StepEditScreen(rootUri: String, onBack: () -> Unit, onGoStep: (Int) -> Unit)
                 binMode = project?.settings?.binaryMode ?: "otsu"
                 binThreshold = (project?.settings?.binaryThreshold ?: 128).toFloat()
                 binInvert = project?.settings?.binaryInvert ?: false
-                // 清除覆盖参数 + 删除 edited 文件（可选）
+
                 val gi = storage.loadGlyphIndex()
                 val updated = gi.glyphs.map {
-                    if (it.code == g.code) it.copy(
-                        binaryOverride = null, manualEdited = false
-                    ) else it
+                    if (it.code == g.code)
+                        it.copy(binaryOverride = null, manualEdited = false)
+                    else it
                 }
                 storage.saveGlyphIndex(GlyphIndex(updated))
                 glyphs = glyphs.toMutableList().also {
@@ -254,7 +270,7 @@ fun StepEditScreen(rootUri: String, onBack: () -> Unit, onGoStep: (Int) -> Unit)
     ) { _, _ ->
         Column(Modifier.fillMaxSize()) {
 
-            // ========== 命名行 ==========
+            // 命名行
             Surface(color = MaterialTheme.colorScheme.surfaceVariant) {
                 Row(
                     Modifier
@@ -279,7 +295,7 @@ fun StepEditScreen(rootUri: String, onBack: () -> Unit, onGoStep: (Int) -> Unit)
                 }
             }
 
-            // ========== 参数栏 ==========
+            // 参数栏
             Surface(color = MaterialTheme.colorScheme.surfaceVariant) {
                 Column(Modifier.padding(horizontal = 12.dp, vertical = 6.dp)) {
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -321,7 +337,10 @@ fun StepEditScreen(rootUri: String, onBack: () -> Unit, onGoStep: (Int) -> Unit)
                                 )
                             ) { Text("擦除", fontSize = 13.sp) }
                             Spacer(Modifier.weight(1f))
-                            Text("笔刷 ${brushSizeDp.toInt()}", fontSize = 12.sp)
+                            Text(
+                                "笔刷 ${brushSizeDp.toInt()}",
+                                fontSize = 12.sp
+                            )
                         }
                         Slider(
                             value = brushSizeDp,
@@ -331,7 +350,11 @@ fun StepEditScreen(rootUri: String, onBack: () -> Unit, onGoStep: (Int) -> Unit)
                         )
                     } else {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            val modes = listOf("otsu" to "Otsu", "fixed" to "固定", "adaptive" to "自适应")
+                            val modes = listOf(
+                                "otsu" to "Otsu",
+                                "fixed" to "固定",
+                                "adaptive" to "自适应"
+                            )
                             modes.forEach { (v, label) ->
                                 Button(
                                     onClick = {
@@ -343,7 +366,9 @@ fun StepEditScreen(rootUri: String, onBack: () -> Unit, onGoStep: (Int) -> Unit)
                                             MaterialTheme.colorScheme.primary
                                         else MaterialTheme.colorScheme.surface
                                     ),
-                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                                    contentPadding = PaddingValues(
+                                        horizontal = 8.dp, vertical = 4.dp
+                                    )
                                 ) { Text(label, fontSize = 12.sp) }
                                 Spacer(Modifier.width(4.dp))
                             }
@@ -360,14 +385,19 @@ fun StepEditScreen(rootUri: String, onBack: () -> Unit, onGoStep: (Int) -> Unit)
                         }
                         if (binMode == "fixed") {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text("阈值 ${binThreshold.toInt()}", fontSize = 12.sp)
+                                Text(
+                                    "阈值 ${binThreshold.toInt()}",
+                                    fontSize = 12.sp
+                                )
                                 Slider(
                                     value = binThreshold,
                                     onValueChange = {
                                         binThreshold = it; modified = true
                                     },
                                     valueRange = 0f..255f,
-                                    modifier = Modifier.weight(1f).padding(horizontal = 8.dp)
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .padding(horizontal = 8.dp)
                                 )
                             }
                         }
@@ -375,8 +405,13 @@ fun StepEditScreen(rootUri: String, onBack: () -> Unit, onGoStep: (Int) -> Unit)
                 }
             }
 
-            // ========== 画布 ==========
-            Box(Modifier.weight(1f).fillMaxWidth().background(Color(0xFF202020))) {
+            // 画布
+            Box(
+                Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .background(Color(0xFF202020))
+            ) {
                 BrushCanvas(
                     bitmap = bitmap,
                     version = bitmapVersion,
@@ -392,7 +427,7 @@ fun StepEditScreen(rootUri: String, onBack: () -> Unit, onGoStep: (Int) -> Unit)
         }
     }
 
-    // 预览
+    // 全屏预览
     if (showPreview) {
         val bmp = bitmap
         if (bmp != null) {
@@ -401,7 +436,9 @@ fun StepEditScreen(rootUri: String, onBack: () -> Unit, onGoStep: (Int) -> Unit)
                 properties = DialogProperties(usePlatformDefaultWidth = false)
             ) {
                 Box(
-                    Modifier.fillMaxSize().background(Color.Black)
+                    Modifier
+                        .fillMaxSize()
+                        .background(Color.Black)
                         .clickable { showPreview = false },
                     contentAlignment = Alignment.Center
                 ) {
@@ -416,7 +453,7 @@ fun StepEditScreen(rootUri: String, onBack: () -> Unit, onGoStep: (Int) -> Unit)
         } else showPreview = false
     }
 
-    // 首次进入弹二值化参数
+    // 首次进入弹二值化默认参数
     if (showBinDialog) {
         AlertDialog(
             onDismissRequest = { },
@@ -426,13 +463,19 @@ fun StepEditScreen(rootUri: String, onBack: () -> Unit, onGoStep: (Int) -> Unit)
                     Text("所有字块的默认二值化参数，之后可在编辑中单独调整。")
                     Spacer(Modifier.height(8.dp))
                     Row {
-                        listOf("otsu" to "Otsu", "fixed" to "固定", "adaptive" to "自适应").forEach {
-                            (v, label) ->
-                            RadioButton(
-                                selected = binMode == v,
-                                onClick = { binMode = v }
-                            )
-                            Text(label)
+                        listOf(
+                            "otsu" to "Otsu",
+                            "fixed" to "固定",
+                            "adaptive" to "自适应"
+                        ).forEach { (v, label) ->
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                RadioButton(
+                                    selected = binMode == v,
+                                    onClick = { binMode = v }
+                                )
+                                Text(label)
+                                Spacer(Modifier.width(6.dp))
+                            }
                         }
                     }
                 }
