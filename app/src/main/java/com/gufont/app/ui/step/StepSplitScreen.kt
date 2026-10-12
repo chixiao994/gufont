@@ -34,8 +34,8 @@ import java.util.Locale
 
 private data class FlatColumn(
     val pageIndex: Int,
-    val colIndexFromRight: Int,  // 1-based
-    val colIndexFromLeft: Int,   // 0-based
+    val colIndexFromRight: Int,
+    val colIndexFromLeft: Int,
     val page: Page,
     val columnInfo: ColumnInfo
 )
@@ -50,29 +50,24 @@ fun StepSplitScreen(rootUri: String, onBack: () -> Unit, onGoStep: (Int) -> Unit
     var flatColumns by remember { mutableStateOf<List<FlatColumn>>(emptyList()) }
     var index by remember { mutableStateOf(0) }
 
-    // 当前列显示数据
     var correctedBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var columnBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var dividers by remember { mutableStateOf<List<Float>>(emptyList()) }
     var rowCount by remember { mutableStateOf(10) }
     var rowOverlap by remember { mutableStateOf(0) }
 
-    // 全局参数
     var globalRowCount by remember { mutableStateOf(10) }
     var globalOverlap by remember { mutableStateOf(0) }
 
-    // 编辑中的文本
     var currentRowCountText by remember { mutableStateOf("10") }
     var currentOverlapText by remember { mutableStateOf("0") }
 
-    // 标记模式
     var markMode by remember { mutableStateOf(false) }
     var droppedRows by remember { mutableStateOf<Set<Int>>(emptySet()) }
 
-    // 预览
     var showPreview by remember { mutableStateOf(false) }
+    var lastLoadedPage by remember { mutableStateOf(-1) }
 
-    // ---------- 加载项目 + 拉平所有列 ----------
     LaunchedEffect(rootUri) {
         try {
             val proj = storage.loadProject()
@@ -85,10 +80,10 @@ fun StepSplitScreen(rootUri: String, onBack: () -> Unit, onGoStep: (Int) -> Unit
             for (pg in pages) {
                 val geo = pg.geometry ?: continue
                 val n = geo.columnCount
-                // 页内从右往左：colFromRight = 1..n 对应 colFromLeft = n-1..0
                 for (k in (n - 1) downTo 0) {
                     val colRight = n - k
-                    val info = pg.columns.getOrNull(k) ?: ColumnInfo(colIndex = colRight)
+                    val info = pg.columns.getOrNull(k)
+                        ?: ColumnInfo(colIndex = colRight)
                     flat.add(
                         FlatColumn(
                             pageIndex = pg.pageIndex,
@@ -105,12 +100,10 @@ fun StepSplitScreen(rootUri: String, onBack: () -> Unit, onGoStep: (Int) -> Unit
         } catch (_: Exception) { }
     }
 
-    // ---------- 加载当前列 ----------
     LaunchedEffect(flatColumns, index) {
         val fc = flatColumns.getOrNull(index) ?: return@LaunchedEffect
         val proj = project ?: return@LaunchedEffect
 
-        // 读校正图
         val cUri = storage.openFileUri("pages", fc.page.correctedName ?: "")
         if (cUri == null) {
             columnBitmap = null
@@ -118,9 +111,7 @@ fun StepSplitScreen(rootUri: String, onBack: () -> Unit, onGoStep: (Int) -> Unit
         }
 
         withContext(Dispatchers.IO) {
-            // 缓存：同页只解一次
-            val needReload = correctedBitmap == null ||
-                    lastLoadedPage != fc.pageIndex
+            val needReload = correctedBitmap == null || lastLoadedPage != fc.pageIndex
             if (needReload) {
                 correctedBitmap?.recycle()
                 correctedBitmap = BitmapIO.decodeSampled(context, cUri, 3000)
@@ -136,28 +127,23 @@ fun StepSplitScreen(rootUri: String, onBack: () -> Unit, onGoStep: (Int) -> Unit
             }
         }
 
-        // 初始化行线
         val info = fc.columnInfo
         rowCount = if (info.confirmed) info.rows else proj.layout.globalRowCount
         rowOverlap = info.rowOverlap
-        dividers = if (info.dividers.isNotEmpty() && info.dividers.size == rowCount - 1)
-            info.dividers else evenDividers(rowCount)
+        dividers = if (info.dividers.isNotEmpty() &&
+            info.dividers.size == rowCount - 1
+        ) info.dividers else evenDividers(rowCount)
         currentRowCountText = rowCount.toString()
         currentOverlapText = rowOverlap.toString()
         droppedRows = emptySet()
         markMode = false
     }
 
-    // 缓存页码标记
-    var lastLoadedPage by remember { mutableStateOf(-1) }
-
-    // ---------- 保存当前列 ----------
     suspend fun saveCurrentColumn() {
         val fc = flatColumns.getOrNull(index) ?: return
         val cb = correctedBitmap ?: return
         val proj = project ?: return
 
-        // 1. 更新 page.json 的 columnInfo
         val newInfo = fc.columnInfo.copy(
             rows = rowCount,
             dividers = dividers,
@@ -175,7 +161,6 @@ fun StepSplitScreen(rootUri: String, onBack: () -> Unit, onGoStep: (Int) -> Unit
         )
         storage.savePage(updatedPage)
 
-        // 2. 切字块 + 生成 Glyph 记录
         val columnBmp = columnBitmap ?: return
         val glyphIndex = storage.loadGlyphIndex()
         val byCode = glyphIndex.glyphs.associateBy { it.code }.toMutableMap()
@@ -220,11 +205,9 @@ fun StepSplitScreen(rootUri: String, onBack: () -> Unit, onGoStep: (Int) -> Unit
         storage.saveGlyphIndex(GlyphIndex(byCode.values.toList()))
     }
 
-    // ---------- 翻页 ----------
     fun goTo(target: Int) {
         if (target < 0) return
         if (target >= flatColumns.size) {
-            // 完成
             scope.launch {
                 val proj = storage.loadProject()
                 val newSteps = proj.steps.toMutableMap()
@@ -233,7 +216,6 @@ fun StepSplitScreen(rootUri: String, onBack: () -> Unit, onGoStep: (Int) -> Unit
                     done = flatColumns.size,
                     total = flatColumns.size
                 )
-                // 更新 glyph 总数
                 val gi = storage.loadGlyphIndex()
                 newSteps[Step.EDIT.id] = StepState(
                     completed = false,
@@ -247,8 +229,6 @@ fun StepSplitScreen(rootUri: String, onBack: () -> Unit, onGoStep: (Int) -> Unit
         }
         scope.launch {
             try { saveCurrentColumn() } catch (_: Exception) { }
-            // 缓存清理：如果换页了，保留 correctedBitmap，因为可能下一页还是这页
-            // 但如果跳很多页，就在 LaunchedEffect 里判断
             index = target
         }
     }
@@ -261,7 +241,6 @@ fun StepSplitScreen(rootUri: String, onBack: () -> Unit, onGoStep: (Int) -> Unit
         resetEnabled = true,
         previewEnabled = true,
         onReset = {
-            // 只重置当前列
             dividers = evenDividers(globalRowCount)
             rowCount = globalRowCount
             rowOverlap = globalOverlap
@@ -283,14 +262,12 @@ fun StepSplitScreen(rootUri: String, onBack: () -> Unit, onGoStep: (Int) -> Unit
     ) { _, _ ->
         Column(Modifier.fillMaxSize()) {
 
-            // ========== 参数栏 ==========
             Surface(
                 color = MaterialTheme.colorScheme.surfaceVariant,
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(Modifier.padding(horizontal = 12.dp, vertical = 6.dp)) {
 
-                    // 列标题 + 进度
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         val fc = flatColumns.getOrNull(index)
                         val proj = project
@@ -301,8 +278,10 @@ fun StepSplitScreen(rootUri: String, onBack: () -> Unit, onGoStep: (Int) -> Unit
                                 fc.colIndexFromRight.toString().padStart(2, '0')
                             }"
                         } else "—"
-                        Text(title, fontSize = 13.sp,
-                            color = MaterialTheme.colorScheme.primary)
+                        Text(
+                            title, fontSize = 13.sp,
+                            color = MaterialTheme.colorScheme.primary
+                        )
                         Spacer(Modifier.weight(1f))
                         Text(
                             "${index + 1}/${flatColumns.size}",
@@ -331,7 +310,8 @@ fun StepSplitScreen(rootUri: String, onBack: () -> Unit, onGoStep: (Int) -> Unit
                             "当前列",
                             currentRowCountText,
                             { s ->
-                                currentRowCountText = s.filter { it.isDigit() }.take(3)
+                                currentRowCountText =
+                                    s.filter { it.isDigit() }.take(3)
                                 val v = currentRowCountText.toIntOrNull()
                                     ?: return@NumberField
                                 val rc = v.coerceIn(1, 100)
@@ -344,8 +324,10 @@ fun StepSplitScreen(rootUri: String, onBack: () -> Unit, onGoStep: (Int) -> Unit
                             "上下重叠",
                             currentOverlapText,
                             { s ->
-                                currentOverlapText = s.filter { it.isDigit() }.take(4)
-                                rowOverlap = currentOverlapText.toIntOrNull() ?: 0
+                                currentOverlapText =
+                                    s.filter { it.isDigit() }.take(4)
+                                rowOverlap =
+                                    currentOverlapText.toIntOrNull() ?: 0
                             },
                             Modifier.weight(1f)
                         )
@@ -366,7 +348,6 @@ fun StepSplitScreen(rootUri: String, onBack: () -> Unit, onGoStep: (Int) -> Unit
                 }
             }
 
-            // ========== 显示区 ==========
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 SplitCanvas(
                     columnBitmap = columnBitmap,
@@ -388,7 +369,6 @@ fun StepSplitScreen(rootUri: String, onBack: () -> Unit, onGoStep: (Int) -> Unit
         }
     }
 
-    // 全屏预览
     if (showPreview) {
         val bmp = correctedBitmap
         if (bmp != null) {
@@ -411,9 +391,7 @@ fun StepSplitScreen(rootUri: String, onBack: () -> Unit, onGoStep: (Int) -> Unit
                     )
                 }
             }
-        } else {
-            showPreview = false
-        }
+        } else showPreview = false
     }
 }
 
