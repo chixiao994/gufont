@@ -68,11 +68,15 @@ fun AppNav() {
             val uri = e.arguments?.getString("rootUri") ?: return@composable
             val stepId = e.arguments?.getInt("stepId") ?: 0
 
-            val goHome = { nav.popBackStack(Routes.PROJECT_HOME, false) }
+            val goHome: () -> Unit = {
+                nav.popBackStack(Routes.PROJECT_HOME, false)
+                Unit
+            }
             val goStep: (Int) -> Unit = { id ->
                 nav.navigate(Routes.step(uri, id)) {
                     popUpTo(Routes.STEP) { inclusive = true }
                 }
+                Unit
             }
 
             when (stepId) {
