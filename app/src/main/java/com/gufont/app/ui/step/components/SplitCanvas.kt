@@ -9,22 +9,16 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import kotlin.math.abs
 import kotlin.math.min
 
-/**
- * 单列分行画布。
- *
- * - 显示列窄条图（居中，按屏幕高度等比缩放）
- * - 绘制 N-1 条横线（跨过列边界，视觉延伸）
- * - 拖动横线调位置
- * - 标记模式：点行块切换丢弃
- */
 @Composable
 fun SplitCanvas(
     columnBitmap: Bitmap?,
@@ -57,12 +51,12 @@ fun SplitCanvas(
 
         val imgBitmap = remember(columnBitmap) { columnBitmap?.asImageBitmap() }
 
-        if (imgBitmap == null || imgRect == null || dividers.isEmpty()) {
+        if (imgBitmap == null || imgRect == null ||
+            columnBitmap == null || dividers.isEmpty()
+        ) {
             Canvas(Modifier.fillMaxSize()) { }
             return@BoxWithConstraints
         }
-
-        val rowCount = dividers.size + 1
 
         Canvas(
             Modifier
@@ -73,13 +67,13 @@ fun SplitCanvas(
                             downPos = pos
                             downTime = System.currentTimeMillis()
                             if (!markMode) {
-                                // 找最近的行线（只按 y 距离比较）
                                 val nearest = dividers.indices.minByOrNull { i ->
                                     val y = imgRect.top + dividers[i] * imgRect.height
                                     abs(y - pos.y)
                                 }
                                 if (nearest != null) {
-                                    val y = imgRect.top + dividers[nearest] * imgRect.height
+                                    val y = imgRect.top +
+                                            dividers[nearest] * imgRect.height
                                     if (abs(y - pos.y) < 60f) {
                                         dragIndex = nearest
                                         touchPos = pos
@@ -94,7 +88,8 @@ fun SplitCanvas(
                                 val ny = ((pos.y - imgRect.top) / imgRect.height)
                                     .coerceIn(0.005f, 0.995f)
                                 val newList = dividers.toMutableList()
-                                val lo = if (dragIndex > 0) newList[dragIndex - 1] + 0.005f else 0.01f
+                                val lo = if (dragIndex > 0)
+                                    newList[dragIndex - 1] + 0.005f else 0.01f
                                 val hi = if (dragIndex < newList.size - 1)
                                     newList[dragIndex + 1] - 0.005f else 0.99f
                                 newList[dragIndex] = ny.coerceIn(lo, hi)
@@ -134,7 +129,6 @@ fun SplitCanvas(
                 dstSize = IntSize(imgRect.width.toInt(), imgRect.height.toInt())
             )
 
-            // 丢弃行的蒙层
             if (markMode) {
                 val boundaries = listOf(0f) + dividers + listOf(1f)
                 for (i in 0 until boundaries.size - 1) {
@@ -144,15 +138,12 @@ fun SplitCanvas(
                         drawRect(
                             color = Color(0x88000000),
                             topLeft = Offset(imgRect.left, y0),
-                            size = androidx.compose.ui.geometry.Size(
-                                imgRect.width, y1 - y0
-                            )
+                            size = Size(imgRect.width, y1 - y0)
                         )
                     }
                 }
             }
 
-            // 行线：跨过列边界，左右各延伸 30px
             val extend = 30f
             dividers.forEachIndexed { i, nd ->
                 val y = imgRect.top + nd * imgRect.height
@@ -163,14 +154,12 @@ fun SplitCanvas(
                     end = Offset(imgRect.right + extend, y),
                     strokeWidth = if (isDragging) 6f else 4f
                 )
-                // 左右端点把手
                 drawCircle(Color.White, radius = 10f,
                     center = Offset(imgRect.left, y))
                 drawCircle(Color.White, radius = 10f,
                     center = Offset(imgRect.right, y))
             }
 
-            // 行号（从上到下）
             val boundaries = listOf(0f) + dividers + listOf(1f)
             for (i in 0 until boundaries.size - 1) {
                 val yc = imgRect.top +
@@ -189,7 +178,7 @@ fun SplitCanvas(
         }
 
         val tp = touchPos
-        if (tp != null && dragIndex >= 0 && imgBitmap != null) {
+        if (tp != null && dragIndex >= 0) {
             MagnifierCanvas(
                 image = imgBitmap,
                 imageRectOnCanvas = imgRect,
