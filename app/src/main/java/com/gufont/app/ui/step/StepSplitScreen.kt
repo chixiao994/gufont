@@ -67,6 +67,8 @@ fun StepSplitScreen(rootUri: String, onBack: () -> Unit, onGoStep: (Int) -> Unit
 
     var showPreview by remember { mutableStateOf(false) }
     var lastLoadedPage by remember { mutableStateOf(-1) }
+    var loadError by remember { mutableStateOf<String?>(null) }
+    var loading by remember { mutableStateOf(false) }
 
     LaunchedEffect(rootUri) {
         try {
@@ -75,7 +77,8 @@ fun StepSplitScreen(rootUri: String, onBack: () -> Unit, onGoStep: (Int) -> Unit
             globalRowCount = proj.layout.globalRowCount
             globalOverlap = proj.layout.globalRowOverlap
 
-            val pages = storage.listPages()
+            // ★ 以文件系统为准
+            val pages = storage.syncPagesFromFileSystem()
             val flat = mutableListOf<FlatColumn>()
             for (pg in pages) {
                 val geo = pg.geometry ?: continue
@@ -97,34 +100,65 @@ fun StepSplitScreen(rootUri: String, onBack: () -> Unit, onGoStep: (Int) -> Unit
             }
             flatColumns = flat
             index = 0
-        } catch (_: Exception) { }
+            if (flat.isEmpty()) {
+                loadError = "没有可处理的列\n请先在「校正 + 分列」步骤完成至少一页"
+            }
+        } catch (e: Exception) {
+            loadError = "加载项目失败：${e.message}"
+        }
     }
 
     LaunchedEffect(flatColumns, index) {
-        val fc = flatColumns.getOrNull(index) ?: return@LaunchedEffect
-        val proj = project ?: return@LaunchedEffect
+        correctedBitmap = null
+        columnBitmap = null
+        loadError = null
 
-        val cUri = storage.openFileUri("pages", fc.page.correctedName ?: "")
-        if (cUri == null) {
-            columnBitmap = null
+        val fc = flatColumns.getOrNull(index)
+        if (fc == null) {
+            loadError = "无列：flatColumns.size=${flatColumns.size}, index=$index"
+            return@LaunchedEffect
+        }
+        val proj = project
+        if (proj == null) {
+            loadError = "项目未加载"
             return@LaunchedEffect
         }
 
-        withContext(Dispatchers.IO) {
-            val needReload = correctedBitmap == null || lastLoadedPage != fc.pageIndex
-            if (needReload) {
-                correctedBitmap?.recycle()
-                correctedBitmap = BitmapIO.decodeSampled(context, cUri, 3000)
-                lastLoadedPage = fc.pageIndex
+        val correctedName = fc.page.correctedName
+        if (correctedName.isNullOrBlank()) {
+            loadError = "该页尚未生成校正图\npageIndex=${fc.pageIndex}"
+            return@LaunchedEffect
+        }
+
+        loading = true
+        try {
+            val cUri = storage.openFileUri("pages", correctedName)
+            if (cUri == null) {
+                loadError = "找不到校正图：pages/$correctedName"
+                return@LaunchedEffect
             }
-            val cb = correctedBitmap
-            if (cb != null) {
-                columnBitmap?.recycle()
-                columnBitmap = GlyphCutter.cropColumn(
-                    cb, fc.page, fc.colIndexFromLeft,
-                    fc.page.geometry?.columnOverlap ?: 0
-                )
+
+            withContext(Dispatchers.IO) {
+                val needReload = correctedBitmap == null ||
+                        lastLoadedPage != fc.pageIndex
+                if (needReload) {
+                    correctedBitmap?.recycle()
+                    correctedBitmap = BitmapIO.decodeSampled(context, cUri, 3000)
+                    lastLoadedPage = fc.pageIndex
+                }
+                val cb = correctedBitmap
+                if (cb != null) {
+                    columnBitmap?.recycle()
+                    columnBitmap = GlyphCutter.cropColumn(
+                        cb, fc.page, fc.colIndexFromLeft,
+                        fc.page.geometry?.columnOverlap ?: 0
+                    )
+                }
             }
+        } catch (e: Exception) {
+            loadError = "加载异常：${e.message}"
+        } finally {
+            loading = false
         }
 
         val info = fc.columnInfo
@@ -141,7 +175,6 @@ fun StepSplitScreen(rootUri: String, onBack: () -> Unit, onGoStep: (Int) -> Unit
 
     suspend fun saveCurrentColumn() {
         val fc = flatColumns.getOrNull(index) ?: return
-        val cb = correctedBitmap ?: return
         val proj = project ?: return
 
         val newInfo = fc.columnInfo.copy(
@@ -349,22 +382,41 @@ fun StepSplitScreen(rootUri: String, onBack: () -> Unit, onGoStep: (Int) -> Unit
             }
 
             Box(Modifier.weight(1f).fillMaxWidth()) {
-                SplitCanvas(
-                    columnBitmap = columnBitmap,
-                    dividers = dividers,
-                    onDividersChange = {
-                        dividers = it
-                        rowCount = it.size + 1
-                        currentRowCountText = rowCount.toString()
-                    },
-                    markMode = markMode,
-                    droppedRows = droppedRows,
-                    onToggleRow = { i ->
-                        droppedRows = if (droppedRows.contains(i))
-                            droppedRows - i else droppedRows + i
-                    },
-                    modifier = Modifier.fillMaxSize()
-                )
+                when {
+                    loadError != null -> {
+                        Box(Modifier.fillMaxSize(), Alignment.Center) {
+                            Text(
+                                loadError!!,
+                                color = Color(0xFFE57373),
+                                fontSize = 13.sp,
+                                modifier = Modifier.padding(24.dp)
+                            )
+                        }
+                    }
+                    loading -> {
+                        Box(Modifier.fillMaxSize(), Alignment.Center) {
+                            CircularProgressIndicator()
+                        }
+                    }
+                    else -> {
+                        SplitCanvas(
+                            columnBitmap = columnBitmap,
+                            dividers = dividers,
+                            onDividersChange = {
+                                dividers = it
+                                rowCount = it.size + 1
+                                currentRowCountText = rowCount.toString()
+                            },
+                            markMode = markMode,
+                            droppedRows = droppedRows,
+                            onToggleRow = { i ->
+                                droppedRows = if (droppedRows.contains(i))
+                                    droppedRows - i else droppedRows + i
+                            },
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
+                }
             }
         }
     }
