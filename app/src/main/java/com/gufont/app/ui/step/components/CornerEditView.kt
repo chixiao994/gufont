@@ -18,12 +18,6 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import kotlin.math.min
 
-/**
- * 4 点校正编辑器：显示原图 + 4 个可拖角点。
- * 手指拖动角点时，实时更新角点位置；拖动时显示放大镜。
- *
- * corners 为归一化坐标 0~1（左上、右上、右下、左下），onChange 回调新值。
- */
 @Composable
 fun CornerEditView(
     bitmap: Bitmap?,
@@ -49,7 +43,7 @@ fun CornerEditView(
 
         val imgBitmap = remember(bitmap) { bitmap?.asImageBitmap() }
 
-        if (imgBitmap == null || imageRect == null) {
+        if (imgBitmap == null || imageRect == null || bitmap == null) {
             Canvas(Modifier.fillMaxSize()) { }
             return@BoxWithConstraints
         }
@@ -61,7 +55,6 @@ fun CornerEditView(
                     detectDragGestures(
                         onDragStart = { pos ->
                             if (imageRect.contains(pos)) {
-                                // 找最近的角点
                                 val nearest = corners.indices.minByOrNull { i ->
                                     val p = Offset(
                                         imageRect.left + corners[i].x * imageRect.width,
@@ -84,8 +77,10 @@ fun CornerEditView(
                             if (i >= 0) {
                                 val pos = change.position
                                 touchPos = pos
-                                val nx = ((pos.x - imageRect.left) / imageRect.width).coerceIn(0f, 1f)
-                                val ny = ((pos.y - imageRect.top) / imageRect.height).coerceIn(0f, 1f)
+                                val nx = ((pos.x - imageRect.left) / imageRect.width)
+                                    .coerceIn(0f, 1f)
+                                val ny = ((pos.y - imageRect.top) / imageRect.height)
+                                    .coerceIn(0f, 1f)
                                 val newCorners = corners.toMutableList()
                                 newCorners[i] = Offset(nx, ny)
                                 onCornersChange(newCorners)
@@ -102,7 +97,6 @@ fun CornerEditView(
                 dstSize = IntSize(imageRect.width.toInt(), imageRect.height.toInt())
             )
 
-            // 四边形
             if (corners.size == 4) {
                 val screenPts = corners.map {
                     Offset(
@@ -125,9 +119,8 @@ fun CornerEditView(
             }
         }
 
-        // 放大镜
         val tp = touchPos
-        if (tp != null && dragIndex >= 0 && imgBitmap != null) {
+        if (tp != null && dragIndex >= 0) {
             MagnifierCanvas(
                 image = imgBitmap,
                 imageRectOnCanvas = imageRect,
