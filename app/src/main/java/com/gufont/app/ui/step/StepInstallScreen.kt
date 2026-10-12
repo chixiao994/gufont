@@ -1,21 +1,16 @@
 package com.gufont.app.ui.step
 
-import android.graphics.Color as AndroidColor
 import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -58,7 +53,6 @@ fun StepInstallScreen(rootUri: String, onBack: () -> Unit, onGoStep: (Int) -> Un
     var showPendingList by remember { mutableStateOf(false) }
     var building by remember { mutableStateOf(false) }
 
-    // 加载：把 TTF 从 SAF 拷到 cache，供 Typeface 使用
     suspend fun loadFontFile() {
         val uri = storage.openFileUri("font", "output.ttf") ?: run {
             fontFile = null
@@ -98,7 +92,7 @@ fun StepInstallScreen(rootUri: String, onBack: () -> Unit, onGoStep: (Int) -> Un
     }
 
     // 若字体没生成，自动尝试重建
-    LaunchedEffect(fontFile) {
+    LaunchedEffect(fontFile, project) {
         if (fontFile == null && project != null) {
             building = true
             try {
@@ -133,7 +127,6 @@ fun StepInstallScreen(rootUri: String, onBack: () -> Unit, onGoStep: (Int) -> Un
             if (fontFile != null) showPreviewDialog = true
         },
         bottomBar = {
-            // 字体工具底栏三按钮都变成翻页
             AppBottomBar(
                 prevEnabled = false,
                 skipEnabled = false,
@@ -183,8 +176,9 @@ fun StepInstallScreen(rootUri: String, onBack: () -> Unit, onGoStep: (Int) -> Un
                     InfoRow("字形数", "$glyphCount")
                     InfoRow(
                         "字体文件",
-                        fontFile?.let { "${it.name}  ${"%.1f".format(it.length() / 1024.0)} KB" }
-                            ?: (if (building) "生成中…" else "未生成")
+                        fontFile?.let {
+                            "${it.name}  ${"%.1f".format(it.length() / 1024.0)} KB"
+                        } ?: (if (building) "生成中…" else "未生成")
                     )
                 }
             }
@@ -228,7 +222,11 @@ fun StepInstallScreen(rootUri: String, onBack: () -> Unit, onGoStep: (Int) -> Un
                     valueRange = 12f..60f,
                     modifier = Modifier.weight(1f).padding(horizontal = 8.dp)
                 )
-                Text("${fontSizeSp.toInt()}", fontSize = 12.sp, modifier = Modifier.width(28.dp))
+                Text(
+                    "${fontSizeSp.toInt()}",
+                    fontSize = 12.sp,
+                    modifier = Modifier.width(28.dp)
+                )
             }
 
             // ========= 预览文本输入 =========
@@ -288,18 +286,23 @@ fun StepInstallScreen(rootUri: String, onBack: () -> Unit, onGoStep: (Int) -> Un
         }
     }
 
-    if (showPreviewDialog && fontFile != null) {
+    // ========= 各种弹窗：都用局部变量避免 smart cast 失败 =========
+
+    val previewFile = fontFile
+    if (showPreviewDialog && previewFile != null) {
         Dialog(
             onDismissRequest = { showPreviewDialog = false },
             properties = DialogProperties(usePlatformDefaultWidth = false)
         ) {
             Box(
-                Modifier.fillMaxSize().background(Color(0xFFFAF6EE))
+                Modifier
+                    .fillMaxSize()
+                    .background(Color(0xFFFAF6EE))
                     .clickable { showPreviewDialog = false }
                     .padding(16.dp)
             ) {
                 FontPreviewView(
-                    fontFile = fontFile,
+                    fontFile = previewFile,
                     text = previewText,
                     fontSizeSp = fontSizeSp * 1.3f,
                     modifier = Modifier.fillMaxSize()
@@ -314,9 +317,10 @@ fun StepInstallScreen(rootUri: String, onBack: () -> Unit, onGoStep: (Int) -> Un
         }
     }
 
-    if (showInstallDialog && fontFile != null) {
+    val installFile = fontFile
+    if (showInstallDialog && installFile != null) {
         InstallDialog(
-            fontFile = fontFile,
+            fontFile = installFile,
             onDismiss = { showInstallDialog = false },
             onSystemInstall = {
                 showInstallDialog = false
@@ -325,9 +329,10 @@ fun StepInstallScreen(rootUri: String, onBack: () -> Unit, onGoStep: (Int) -> Un
         )
     }
 
-    if (showSystemInstall && fontFile != null) {
+    val sysFile = fontFile
+    if (showSystemInstall && sysFile != null) {
         SystemInstallDialog(
-            fontFile = fontFile,
+            fontFile = sysFile,
             onDismiss = { showSystemInstall = false }
         )
     }
@@ -337,11 +342,15 @@ fun StepInstallScreen(rootUri: String, onBack: () -> Unit, onGoStep: (Int) -> Un
             onDismissRequest = { showPendingList = false },
             properties = DialogProperties(usePlatformDefaultWidth = false)
         ) {
-            Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.background)
+            ) {
                 PendingListScreen(
                     rootUri = rootUri,
                     onBack = { showPendingList = false },
-                    onEditGlyph = { code ->
+                    onEditGlyph = { _ ->
                         showPendingList = false
                         onGoStep(Step.EDIT.id)
                     }
