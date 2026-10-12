@@ -62,28 +62,76 @@ fun StepCorrectScreen(rootUri: String, onBack: () -> Unit, onGoStep: (Int) -> Un
 
     var showPreview by remember { mutableStateOf(false) }
 
+    var loadError by remember { mutableStateOf<String?>(null) }
+    var loading by remember { mutableStateOf(false) }
+
     LaunchedEffect(rootUri) {
         try {
             val p = storage.loadProject()
             project = p
             globalColumnCount = p.layout.globalColumnCount
             globalOverlap = p.layout.globalColumnOverlap
-            pages = storage.listPages()
+            // ★ 关键：以文件系统为准
+            val list = storage.syncPagesFromFileSystem()
+            pages = list
             index = 0
-        } catch (_: Exception) { }
+            if (list.isEmpty()) {
+                loadError = "pages/ 目录里没有找到任何源图文件\n" +
+                        "请确认已导入 PDF，或手动放入命名为 page_001_src.png 的图片"
+            }
+        } catch (e: Exception) {
+            loadError = "加载项目失败：${e.message}"
+        }
     }
 
     LaunchedEffect(pages, index) {
         correctedBitmap = null
         srcBitmap = null
-        val page = pages.getOrNull(index) ?: return@LaunchedEffect
-        val proj = project ?: return@LaunchedEffect
+        loadError = null
 
-        withContext(Dispatchers.IO) {
-            val uri = storage.openFileUri("pages", page.srcName)
-            if (uri != null) {
-                srcBitmap = BitmapIO.decodeSampled(context, uri, 2400)
+        val page = pages.getOrNull(index)
+        if (page == null) {
+            loadError = "无页面：pages.size=${pages.size}, index=$index"
+            return@LaunchedEffect
+        }
+        val proj = project
+        if (proj == null) {
+            loadError = "项目未加载"
+            return@LaunchedEffect
+        }
+
+        loading = true
+        try {
+            val uri = withContext(Dispatchers.IO) {
+                try {
+                    storage.openFileUri("pages", page.srcName)
+                } catch (e: Exception) {
+                    loadError = "openFileUri 异常：${e.message}"
+                    null
+                }
             }
+            if (uri == null) {
+                loadError = "找不到文件：pages/${page.srcName}"
+                return@LaunchedEffect
+            }
+
+            val bmp = withContext(Dispatchers.IO) {
+                try {
+                    BitmapIO.decodeSampled(context, uri, 2400)
+                } catch (e: Exception) {
+                    loadError = "解码异常：${e.message}"
+                    null
+                }
+            }
+            if (bmp == null) {
+                loadError = "解码返回 null：${page.srcName}"
+                return@LaunchedEffect
+            }
+            srcBitmap = bmp
+        } catch (e: Exception) {
+            loadError = "加载异常：${e.message}"
+        } finally {
+            loading = false
         }
 
         val geo = page.geometry
@@ -290,30 +338,48 @@ fun StepCorrectScreen(rootUri: String, onBack: () -> Unit, onGoStep: (Int) -> Un
             }
 
             Box(Modifier.weight(1f).fillMaxWidth()) {
-                if (subMode == SubMode.CORNER) {
-                    CornerEditView(
-                        bitmap = srcBitmap,
-                        corners = corners,
-                        onCornersChange = { corners = it },
-                        modifier = Modifier.fillMaxSize()
-                    )
-                } else {
-                    ColumnEditView(
-                        bitmap = correctedBitmap ?: srcBitmap,
-                        columnDividers = dividers,
-                        onDividersChange = {
-                            dividers = it
-                            columnCount = it.size + 1
-                            currentColumnCountText = columnCount.toString()
-                        },
-                        markMode = markMode,
-                        droppedColumns = droppedColumns,
-                        onToggleColumn = { i ->
-                            droppedColumns = if (droppedColumns.contains(i))
-                                droppedColumns - i else droppedColumns + i
-                        },
-                        modifier = Modifier.fillMaxSize()
-                    )
+                when {
+                    loadError != null -> {
+                        Box(Modifier.fillMaxSize(), Alignment.Center) {
+                            Text(
+                                loadError!!,
+                                color = Color(0xFFE57373),
+                                fontSize = 13.sp,
+                                modifier = Modifier.padding(24.dp)
+                            )
+                        }
+                    }
+                    loading -> {
+                        Box(Modifier.fillMaxSize(), Alignment.Center) {
+                            CircularProgressIndicator()
+                        }
+                    }
+                    subMode == SubMode.CORNER -> {
+                        CornerEditView(
+                            bitmap = srcBitmap,
+                            corners = corners,
+                            onCornersChange = { corners = it },
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
+                    else -> {
+                        ColumnEditView(
+                            bitmap = correctedBitmap ?: srcBitmap,
+                            columnDividers = dividers,
+                            onDividersChange = {
+                                dividers = it
+                                columnCount = it.size + 1
+                                currentColumnCountText = columnCount.toString()
+                            },
+                            markMode = markMode,
+                            droppedColumns = droppedColumns,
+                            onToggleColumn = { i ->
+                                droppedColumns = if (droppedColumns.contains(i))
+                                    droppedColumns - i else droppedColumns + i
+                            },
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
                 }
             }
         }
