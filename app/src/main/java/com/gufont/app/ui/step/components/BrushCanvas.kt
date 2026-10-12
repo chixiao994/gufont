@@ -20,10 +20,6 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import kotlin.math.min
 
-/**
- * 位图编辑器：拖动手指画黑/白线。
- * 每次修改都直接写入 Bitmap（原分辨率），version 用来触发重绘。
- */
 @Composable
 fun BrushCanvas(
     bitmap: Bitmap?,
@@ -51,7 +47,7 @@ fun BrushCanvas(
 
         val imgBitmap = remember(bitmap, version) { bitmap?.asImageBitmap() }
 
-        if (imgBitmap == null || imageRect == null) {
+        if (imgBitmap == null || imageRect == null || bitmap == null) {
             Canvas(Modifier.fillMaxSize()) { }
             return@BoxWithConstraints
         }
@@ -110,18 +106,16 @@ fun BrushCanvas(
                 dstSize = IntSize(imageRect.width.toInt(), imageRect.height.toInt())
             )
 
-            // 触摸点
             touchPos?.let { p ->
-                val brushPx = with(density) { brushSizeDp.dp.toPx() }
+                val brushPxScreen = brushSizeDp * density.density
                 drawCircle(
                     color = brushColor.copy(alpha = 0.45f),
-                    radius = brushPx / 2f,
+                    radius = brushPxScreen / 2f,
                     center = p
                 )
             }
         }
 
-        // 放大镜
         val tp = touchPos
         if (tp != null) {
             MagnifierCanvas(
