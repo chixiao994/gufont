@@ -21,7 +21,7 @@ class ProjectStorage(
 
     fun isProjectRoot(): Boolean = root.findFile("project.json") != null
 
-    // ---------- 项目 ----------
+    // ========== 项目 ==========
 
     suspend fun loadProject(): Project = withContext(Dispatchers.IO) {
         val f = root.findFile("project.json") ?: error("project.json 不存在")
@@ -49,7 +49,7 @@ class ProjectStorage(
         p
     }
 
-    // ---------- 页 ----------
+    // ========== 页 ==========
 
     suspend fun loadPage(pageIndex: Int): Page? = withContext(Dispatchers.IO) {
         val dir = root.findFile("pages") ?: return@withContext null
@@ -64,8 +64,10 @@ class ProjectStorage(
 
     suspend fun savePage(page: Page) = withContext(Dispatchers.IO) {
         val dir = ensureDir("pages") ?: error("无法创建 pages")
-        writeTextIn(dir, pageJsonName(page.pageIndex),
-            JsonIO.json.encodeToString(Page.serializer(), page))
+        writeTextIn(
+            dir, pageJsonName(page.pageIndex),
+            JsonIO.json.encodeToString(Page.serializer(), page)
+        )
     }
 
     suspend fun listPages(): List<Page> = withContext(Dispatchers.IO) {
@@ -86,7 +88,7 @@ class ProjectStorage(
             }
     }
 
-    // ---------- 字位 ----------
+    // ========== 字位 ==========
 
     suspend fun loadGlyphIndex(): GlyphIndex = withContext(Dispatchers.IO) {
         val dir = root.findFile("glyphs") ?: return@withContext GlyphIndex()
@@ -101,34 +103,60 @@ class ProjectStorage(
 
     suspend fun saveGlyphIndex(index: GlyphIndex) = withContext(Dispatchers.IO) {
         val dir = ensureDir("glyphs") ?: error("无法创建 glyphs")
-        writeTextIn(dir, "glyphs.json",
-            JsonIO.json.encodeToString(GlyphIndex.serializer(), index))
+        writeTextIn(
+            dir, "glyphs.json",
+            JsonIO.json.encodeToString(GlyphIndex.serializer(), index)
+        )
     }
 
-    // ---------- 文件 ----------
+    // ========== 文件 ==========
 
-    /** 写图片（PNG/JPG 等，统一用 image/png MIME） */
-    suspend fun writeImage(dirName: String, fileName: String, bytes: ByteArray) =
-        withContext(Dispatchers.IO) {
-            val dir = ensureDir(dirName) ?: error("无法创建 $dirName")
-            dir.findFile(fileName)?.delete()
-            val f = dir.createFile("image/png", fileName)
-                ?: error("无法创建 $fileName")
-            context.contentResolver.openOutputStream(f.uri, "w")?.use { it.write(bytes) }
-                ?: error("无法写入 $fileName")
-        }
+    /**
+     * 写图片文件。默认 MIME 为 image/png。
+     * 直出 PDF 原始字节时，需要传对应的 mime（image/jpeg、image/jp2、image/tiff）。
+     */
+    suspend fun writeImage(
+        dirName: String,
+        fileName: String,
+        bytes: ByteArray,
+        mime: String = "image/png"
+    ) = withContext(Dispatchers.IO) {
+        val dir = ensureDir(dirName) ?: error("无法创建 $dirName")
+        dir.findFile(fileName)?.delete()
+        val f = dir.createFile(mime, fileName) ?: error("无法创建 $fileName")
+        context.contentResolver.openOutputStream(f.uri, "w")?.use { it.write(bytes) }
+            ?: error("无法写入 $fileName")
+    }
 
-    /** 写任意二进制文件（TTF 等） */
-    suspend fun writeBytes(dirName: String, fileName: String, bytes: ByteArray) =
-        withContext(Dispatchers.IO) {
-            val dir = ensureDir(dirName) ?: error("无法创建 $dirName")
-            dir.findFile(fileName)?.delete()
-            val f = dir.createFile("application/octet-stream", fileName)
-                ?: error("无法创建 $fileName")
-            context.contentResolver.openOutputStream(f.uri, "w")?.use { it.write(bytes) }
-                ?: error("无法写入 $fileName")
-        }
+    /** 写任意二进制文件，显式指定 MIME（PDF 直出、TTF 等用） */
+    suspend fun writeBinary(
+        dirName: String,
+        fileName: String,
+        mime: String,
+        bytes: ByteArray
+    ) = withContext(Dispatchers.IO) {
+        val dir = ensureDir(dirName) ?: error("无法创建 $dirName")
+        dir.findFile(fileName)?.delete()
+        val f = dir.createFile(mime, fileName) ?: error("无法创建 $fileName")
+        context.contentResolver.openOutputStream(f.uri, "w")?.use { it.write(bytes) }
+            ?: error("无法写入 $fileName")
+    }
 
+    /** 写 TTF / 通用二进制（application/octet-stream） */
+    suspend fun writeBytes(
+        dirName: String,
+        fileName: String,
+        bytes: ByteArray
+    ) = withContext(Dispatchers.IO) {
+        val dir = ensureDir(dirName) ?: error("无法创建 $dirName")
+        dir.findFile(fileName)?.delete()
+        val f = dir.createFile("application/octet-stream", fileName)
+            ?: error("无法创建 $fileName")
+        context.contentResolver.openOutputStream(f.uri, "w")?.use { it.write(bytes) }
+            ?: error("无法写入 $fileName")
+    }
+
+    /** 打开文件 URI */
     fun openFileUri(dirName: String, fileName: String): Uri? =
         root.findFile(dirName)?.findFile(fileName)?.uri
 
@@ -140,7 +168,16 @@ class ProjectStorage(
             } catch (_: Exception) { }
         }
 
-    // ---------- 内部工具 ----------
+    /** 读取文件全部字节 */
+    suspend fun readFileBytes(dirName: String, fileName: String): ByteArray? =
+        withContext(Dispatchers.IO) {
+            try {
+                val uri = openFileUri(dirName, fileName) ?: return@withContext null
+                context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+            } catch (_: Exception) { null }
+        }
+
+    // ========== 内部工具 ==========
 
     private fun ensureDir(name: String): DocumentFile? {
         val r = root
