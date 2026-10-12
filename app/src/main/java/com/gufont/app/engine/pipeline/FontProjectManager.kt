@@ -1,8 +1,8 @@
 package com.gufont.app.engine.pipeline
 
 import android.content.Context
-import android.net.Uri
-import com.gufont.app.data.model.*
+import com.gufont.app.data.model.GlyphState
+import com.gufont.app.data.model.Project
 import com.gufont.app.data.storage.ProjectStorage
 import com.gufont.app.engine.font.FontGlyph
 import com.gufont.app.engine.font.TtfBuilder
@@ -12,10 +12,6 @@ import kotlinx.coroutines.withContext
 
 object FontProjectManager {
 
-    /**
-     * 根据当前项目状态重新生成 TTF，并写入 font/output.ttf。
-     * 返回 (成功数, 失败列表 [code])。
-     */
     suspend fun rebuildFont(
         context: Context,
         storage: ProjectStorage,
@@ -37,7 +33,6 @@ object FontProjectManager {
             if (g.state == GlyphState.SKIPPED) continue
             if (g.codepoint <= 0) continue
 
-            // 重码检查
             if (!usedCodepoints.add(g.codepoint)) {
                 issues.add(g.code to "重码 U+${g.codepoint.toString(16).uppercase()}")
                 continue
@@ -69,7 +64,7 @@ object FontProjectManager {
         }
 
         val bytes = TtfBuilder(project.settings.fontFamily).build(fontGlyphs)
-        storage.writeImage("font", "output.ttf", bytes)
+        storage.writeBytes("font", "output.ttf", bytes)
 
         Pair(fontGlyphs.size, issues)
     }
