@@ -1,2 +1,4 @@
 -keep class com.gufont.app.data.model.** { *; }
+-keep class com.tom_roush.** { *; }
+-dontwarn com.tom_roush.**
 -keepattributes *Annotation*, InnerClasses
