@@ -4,9 +4,9 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.Path.FillType
 import androidx.compose.ui.graphics.drawscope.Stroke
 import com.gufont.app.engine.potrace.PotracePath
 import com.gufont.app.engine.potrace.SegmentTag
@@ -23,7 +23,7 @@ fun VectorOverlay(
 ) {
     Canvas(modifier.fillMaxSize()) {
         if (paths.isEmpty()) return@Canvas
-        val combined = Path().apply { fillType = Path.FillType.EVEN_ODD }
+        val combined = Path().apply { fillType = FillType.EVEN_ODD }
 
         for (p in paths) {
             val segs = if (p.optimizedSegments.isNotEmpty())
