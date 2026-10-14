@@ -9,6 +9,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.gufont.app.data.model.Step
 import com.gufont.app.data.model.StepState
@@ -28,6 +29,19 @@ fun StepImportScreen(rootUri: String, onBack: () -> Unit, onGoStep: (Int) -> Uni
     var done by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
 
+    // ★ 进入时读项目状态，若已完成则直接显示"已完成"
+    LaunchedEffect(rootUri) {
+        try {
+            val p = storage.loadProject()
+            val st = p.steps[Step.IMPORT.id]
+            if (st?.completed == true && st.total > 0) {
+                done = true
+                progressText = "已完成：${st.done} 页"
+                progressValue = 1f
+            }
+        } catch (_: Exception) { }
+    }
+
     val pickPdf = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri ->
@@ -46,7 +60,6 @@ fun StepImportScreen(rootUri: String, onBack: () -> Unit, onGoStep: (Int) -> Uni
                     progressText = "转换 $d/$t · $name"
                     progressValue = d.toFloat() / t
                 }
-                // 更新进度
                 val proj = storage.loadProject()
                 val newSteps = proj.steps.toMutableMap()
                 newSteps[Step.IMPORT.id] = StepState(
@@ -55,6 +68,7 @@ fun StepImportScreen(rootUri: String, onBack: () -> Unit, onGoStep: (Int) -> Uni
                 storage.saveProject(proj.copy(steps = newSteps, lastStep = Step.IMPORT.id))
                 done = true
                 progressText = "完成：$total 页"
+                progressValue = 1f
             } catch (e: Exception) {
                 error = "转换失败：${e.message}"
             } finally {
@@ -70,16 +84,25 @@ fun StepImportScreen(rootUri: String, onBack: () -> Unit, onGoStep: (Int) -> Uni
         onGoStep = onGoStep,
         resetEnabled = false,
         previewEnabled = false,
+        onRefresh = {
+            // 重新读取导入状态
+            try {
+                val p = storage.loadProject()
+                val st = p.steps[Step.IMPORT.id]
+                if (st?.completed == true && st.total > 0) {
+                    done = true
+                    progressText = "已完成：${st.done} 页"
+                    progressValue = 1f
+                } else {
+                    done = false
+                }
+            } catch (_: Exception) { }
+        },
         bottomBar = {
-            // 导入步骤无翻页，用"完成，下一步"代替
             if (done) {
-                AppBottomBarForImport(
-                    onNext = {
-                        onGoStep(Step.CORRECT.id)
-                    }
-                )
+                ImportBottomBar(onNext = { onGoStep(Step.CORRECT.id) })
             } else {
-                AppBottomBarDisabled()
+                DisabledBottomBar()
             }
         }
     ) { _, _ ->
@@ -125,6 +148,10 @@ fun StepImportScreen(rootUri: String, onBack: () -> Unit, onGoStep: (Int) -> Uni
                         color = MaterialTheme.colorScheme.outline,
                         style = MaterialTheme.typography.bodySmall
                     )
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedButton(
+                        onClick = { pickPdf.launch(arrayOf("application/pdf")) }
+                    ) { Text("重新导入") }
                 }
 
                 error?.let {
@@ -136,7 +163,7 @@ fun StepImportScreen(rootUri: String, onBack: () -> Unit, onGoStep: (Int) -> Uni
 }
 
 @Composable
-private fun AppBottomBarForImport(onNext: () -> Unit) {
+private fun ImportBottomBar(onNext: () -> Unit) {
     Surface(color = MaterialTheme.colorScheme.surface, shadowElevation = 6.dp) {
         Row(
             Modifier
@@ -151,14 +178,14 @@ private fun AppBottomBarForImport(onNext: () -> Unit) {
                 Text("跳过")
             }
             TextButton(onClick = onNext, modifier = Modifier.weight(1f)) {
-                Text("下一张", fontWeight = androidx.compose.ui.text.font.FontWeight.Medium)
+                Text("下一张", fontWeight = FontWeight.Medium)
             }
         }
     }
 }
 
 @Composable
-private fun AppBottomBarDisabled() {
+private fun DisabledBottomBar() {
     Surface(color = MaterialTheme.colorScheme.surface, shadowElevation = 6.dp) {
         Row(
             Modifier
