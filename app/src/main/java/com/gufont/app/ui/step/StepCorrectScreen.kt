@@ -71,13 +71,11 @@ fun StepCorrectScreen(rootUri: String, onBack: () -> Unit, onGoStep: (Int) -> Un
             project = p
             globalColumnCount = p.layout.globalColumnCount
             globalOverlap = p.layout.globalColumnOverlap
-            // ★ 关键：以文件系统为准
-            val list = storage.syncPagesFromFileSystem()
+            val list = storage.listPages()
             pages = list
             index = 0
             if (list.isEmpty()) {
-                loadError = "pages/ 目录里没有找到任何源图文件\n" +
-                        "请确认已导入 PDF，或手动放入命名为 page_001_src.png 的图片"
+                loadError = "pages/ 目录里没有找到任何页面"
             }
         } catch (e: Exception) {
             loadError = "加载项目失败：${e.message}"
