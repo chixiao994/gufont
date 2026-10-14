@@ -12,10 +12,6 @@ import androidx.compose.ui.unit.sp
 import com.gufont.app.data.model.Step
 import com.gufont.app.data.model.StepState
 
-/**
- * 步骤直达菜单。
- * 未完成的前置步骤不可点（灰掉）。
- */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HamburgerMenu(
@@ -35,7 +31,11 @@ fun HamburgerMenu(
             Step.values().forEach { s ->
                 val st = stepStates[s.id] ?: StepState()
                 val isCurrent = s.id == currentStep
-                val unlocked = st.completed || s.id == Step.IMPORT.id
+                // ★ 解锁逻辑：前一步完成才解锁；IMPORT 永远解锁
+                val prevCompleted = if (s.id == Step.IMPORT.id) true
+                else stepStates[s.id - 1]?.completed == true
+                val unlocked = prevCompleted
+
                 Row(
                     Modifier
                         .fillMaxWidth()
