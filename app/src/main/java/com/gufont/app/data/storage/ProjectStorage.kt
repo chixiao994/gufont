@@ -86,56 +86,6 @@ class ProjectStorage(
             }
     }
 
-    /**
-     * ★ 以文件系统为准同步页列表。
-     *
-     * 扫描 pages/ 目录里所有符合命名规则的源图文件：
-     *   page_001_src.png / page_001_src.jpg
-     *   page_001.png / page_001.jpg
-     *   （排除 page_001_corrected.png 等）
-     *
-     * 对每个页码：
-     *   - 若 page_XXX.json 存在 → 加载并修正 srcName 为实际文件名
-     *   - 若不存在 → 创建空 Page（保证能读写）
-     *
-     * 这样即使 json 丢失、被手改、或用户直接从文件夹放图进去，
-     * 也能正确读到。
-     */
-    suspend fun syncPagesFromFileSystem(): List<Page> = withContext(Dispatchers.IO) {
-        val dir = root.findFile("pages") ?: return@withContext emptyList()
-        val files = try { dir.listFiles() } catch (_: Exception) { return@withContext emptyList() }
-
-        // 匹配源图：page_NNN_src.ext 或 page_NNN.ext
-        val srcRegex = Regex(
-            """^page_(\d+)(?:_src)?\.(png|jpg|jpeg|webp)$""",
-            RegexOption.IGNORE_CASE
-        )
-        val srcImages = sortedMapOf<Int, String>()
-        for (f in files) {
-            val name = f.name ?: continue
-            val m = srcRegex.find(name) ?: continue
-            val idx = m.groupValues[1].toIntOrNull() ?: continue
-            // 如果同一页有多个匹配（.jpg 和 .png），优先 png
-            val existing = srcImages[idx]
-            if (existing == null ||
-                (name.lowercase().endsWith(".png") && !existing.lowercase().endsWith(".png"))
-            ) {
-                srcImages[idx] = name
-            }
-        }
-
-        srcImages.map { (idx, srcName) ->
-            val existing = loadPage(idx)
-            if (existing != null) {
-                // 以文件系统为准修正 srcName
-                if (existing.srcName != srcName) existing.copy(srcName = srcName)
-                else existing
-            } else {
-                Page(pageIndex = idx, srcName = srcName)
-            }
-        }
-    }
-
     // ---------- 字位 ----------
 
     suspend fun loadGlyphIndex(): GlyphIndex = withContext(Dispatchers.IO) {
