@@ -77,8 +77,7 @@ fun StepSplitScreen(rootUri: String, onBack: () -> Unit, onGoStep: (Int) -> Unit
             globalRowCount = proj.layout.globalRowCount
             globalOverlap = proj.layout.globalRowOverlap
 
-            // ★ 以文件系统为准
-            val pages = storage.syncPagesFromFileSystem()
+            val pages = storage.listPages()
             val flat = mutableListOf<FlatColumn>()
             for (pg in pages) {
                 val geo = pg.geometry ?: continue
