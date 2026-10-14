@@ -19,12 +19,12 @@ class ProjectStorage(
         get() = DocumentFile.fromTreeUri(context, rootUri)
             ?: error("无法访问项目根目录")
 
-    fun isProjectRoot(): Boolean = root.findFile("project.json") != null
+    fun isProjectRoot(): Boolean = findRootFile("project.json") != null
 
-    // ---------- 项目 ----------
+    // ========== 项目 ==========
 
     suspend fun loadProject(): Project = withContext(Dispatchers.IO) {
-        val f = root.findFile("project.json") ?: error("project.json 不存在")
+        val f = findRootFile("project.json") ?: error("project.json 不存在")
         val text = context.contentResolver.openInputStream(f.uri)
             ?.use { it.readBytes().toString(Charsets.UTF_8) }
             ?: error("无法读取 project.json")
@@ -49,11 +49,11 @@ class ProjectStorage(
         p
     }
 
-    // ---------- 页 ----------
+    // ========== 页 ==========
 
     suspend fun loadPage(pageIndex: Int): Page? = withContext(Dispatchers.IO) {
-        val dir = root.findFile("pages") ?: return@withContext null
-        val f = dir.findFile(pageJsonName(pageIndex)) ?: return@withContext null
+        val dir = findSubDir("pages") ?: return@withContext null
+        val f = findFileIn(dir, pageJsonName(pageIndex)) ?: return@withContext null
         try {
             val text = context.contentResolver.openInputStream(f.uri)
                 ?.use { it.readBytes().toString(Charsets.UTF_8) }
@@ -64,16 +64,19 @@ class ProjectStorage(
 
     suspend fun savePage(page: Page) = withContext(Dispatchers.IO) {
         val dir = ensureDir("pages") ?: error("无法创建 pages")
-        writeTextIn(dir, pageJsonName(page.pageIndex),
-            JsonIO.json.encodeToString(Page.serializer(), page))
+        writeTextIn(
+            dir, pageJsonName(page.pageIndex),
+            JsonIO.json.encodeToString(Page.serializer(), page)
+        )
     }
 
     suspend fun listPages(): List<Page> = withContext(Dispatchers.IO) {
-        val dir = root.findFile("pages") ?: return@withContext emptyList()
-        dir.listFiles()
+        val dir = findSubDir("pages") ?: return@withContext emptyList()
+        val files = try { dir.listFiles() } catch (_: Exception) { emptyArray() }
+        files
             .filter {
-                it.name?.startsWith("page_") == true &&
-                        it.name?.endsWith(".json") == true
+                val n = it.name ?: return@filter false
+                n.startsWith("page_") && n.endsWith(".json")
             }
             .sortedBy { it.name }
             .mapNotNull {
@@ -86,11 +89,11 @@ class ProjectStorage(
             }
     }
 
-    // ---------- 字位 ----------
+    // ========== 字位 ==========
 
     suspend fun loadGlyphIndex(): GlyphIndex = withContext(Dispatchers.IO) {
-        val dir = root.findFile("glyphs") ?: return@withContext GlyphIndex()
-        val f = dir.findFile("glyphs.json") ?: return@withContext GlyphIndex()
+        val dir = findSubDir("glyphs") ?: return@withContext GlyphIndex()
+        val f = findFileIn(dir, "glyphs.json") ?: return@withContext GlyphIndex()
         try {
             val t = context.contentResolver.openInputStream(f.uri)
                 ?.use { s -> s.readBytes().toString(Charsets.UTF_8) }
@@ -101,54 +104,120 @@ class ProjectStorage(
 
     suspend fun saveGlyphIndex(index: GlyphIndex) = withContext(Dispatchers.IO) {
         val dir = ensureDir("glyphs") ?: error("无法创建 glyphs")
-        writeTextIn(dir, "glyphs.json",
-            JsonIO.json.encodeToString(GlyphIndex.serializer(), index))
+        writeTextIn(
+            dir, "glyphs.json",
+            JsonIO.json.encodeToString(GlyphIndex.serializer(), index)
+        )
     }
 
-    // ---------- 文件 ----------
+    // ========== 文件 ==========
 
-    suspend fun writeImage(dirName: String, fileName: String, bytes: ByteArray) =
-        withContext(Dispatchers.IO) {
-            val dir = ensureDir(dirName) ?: error("无法创建 $dirName")
-            dir.findFile(fileName)?.delete()
-            val f = dir.createFile("image/png", fileName)
-                ?: error("无法创建 $fileName")
-            context.contentResolver.openOutputStream(f.uri, "w")?.use { it.write(bytes) }
-                ?: error("无法写入 $fileName")
-        }
+    suspend fun writeImage(
+        dirName: String,
+        fileName: String,
+        bytes: ByteArray,
+        mime: String = "image/png"
+    ) = withContext(Dispatchers.IO) {
+        val dir = ensureDir(dirName) ?: error("无法创建 $dirName")
+        deleteIfExists(dir, fileName)
+        val f = dir.createFile(mime, fileName) ?: error("无法创建 $fileName")
+        context.contentResolver.openOutputStream(f.uri, "w")?.use { it.write(bytes) }
+            ?: error("无法写入 $fileName")
+    }
 
-    suspend fun writeBytes(dirName: String, fileName: String, bytes: ByteArray) =
-        withContext(Dispatchers.IO) {
-            val dir = ensureDir(dirName) ?: error("无法创建 $dirName")
-            dir.findFile(fileName)?.delete()
-            val f = dir.createFile("application/octet-stream", fileName)
-                ?: error("无法创建 $fileName")
-            context.contentResolver.openOutputStream(f.uri, "w")?.use { it.write(bytes) }
-                ?: error("无法写入 $fileName")
-        }
+    suspend fun writeBinary(
+        dirName: String,
+        fileName: String,
+        mime: String,
+        bytes: ByteArray
+    ) = withContext(Dispatchers.IO) {
+        val dir = ensureDir(dirName) ?: error("无法创建 $dirName")
+        deleteIfExists(dir, fileName)
+        val f = dir.createFile(mime, fileName) ?: error("无法创建 $fileName")
+        context.contentResolver.openOutputStream(f.uri, "w")?.use { it.write(bytes) }
+            ?: error("无法写入 $fileName")
+    }
 
-    fun openFileUri(dirName: String, fileName: String): Uri? =
-        root.findFile(dirName)?.findFile(fileName)?.uri
+    suspend fun writeBytes(
+        dirName: String,
+        fileName: String,
+        bytes: ByteArray
+    ) = withContext(Dispatchers.IO) {
+        val dir = ensureDir(dirName) ?: error("无法创建 $dirName")
+        deleteIfExists(dir, fileName)
+        val f = dir.createFile("application/octet-stream", fileName)
+            ?: error("无法创建 $fileName")
+        context.contentResolver.openOutputStream(f.uri, "w")?.use { it.write(bytes) }
+            ?: error("无法写入 $fileName")
+    }
+
+    fun openFileUri(dirName: String, fileName: String): Uri? {
+        val dir = findSubDir(dirName) ?: return null
+        return findFileIn(dir, fileName)?.uri
+    }
 
     suspend fun deleteFile(dirName: String, fileName: String) =
         withContext(Dispatchers.IO) {
             try {
-                root.findFile(dirName)?.findFile(fileName)?.delete()
+                val dir = findSubDir(dirName) ?: return@withContext
+                deleteIfExists(dir, fileName)
             } catch (_: Exception) { }
         }
 
-    // ---------- 内部工具 ----------
+    suspend fun readFileBytes(dirName: String, fileName: String): ByteArray? =
+        withContext(Dispatchers.IO) {
+            try {
+                val uri = openFileUri(dirName, fileName) ?: return@withContext null
+                context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+            } catch (_: Exception) { null }
+        }
+
+    // ========== 内部工具（兼容带尾斜杠的目录名） ==========
+
+    /** 在 root 里找子项（文件或目录），名字两侧 trim '/' 后匹配 */
+    private fun findRootFile(name: String): DocumentFile? {
+        val target = name.trimEnd('/')
+        return try {
+            root.listFiles().firstOrNull { it.name?.trimEnd('/') == target }
+        } catch (_: Exception) { null }
+    }
+
+    /** 在 root 里找子目录 */
+    private fun findSubDir(name: String): DocumentFile? {
+        val target = name.trimEnd('/')
+        return try {
+            root.listFiles().firstOrNull {
+                it.isDirectory && it.name?.trimEnd('/') == target
+            }
+        } catch (_: Exception) { null }
+    }
+
+    /** 在指定目录里找子项 */
+    private fun findFileIn(dir: DocumentFile, name: String): DocumentFile? {
+        val target = name.trimEnd('/')
+        return try {
+            dir.listFiles().firstOrNull { it.name?.trimEnd('/') == target }
+        } catch (_: Exception) { null }
+    }
+
+    private fun deleteIfExists(dir: DocumentFile, name: String) {
+        try {
+            findFileIn(dir, name)?.delete()
+        } catch (_: Exception) { }
+    }
 
     private fun ensureDir(name: String): DocumentFile? {
-        val r = root
-        r.findFile(name)?.let { if (it.isDirectory) return it else it.delete() }
-        return r.createDirectory(name)
+        findSubDir(name)?.let { return it }
+        // 若存在同名文件（非目录），删掉再建目录
+        findRootFile(name)?.let {
+            if (!it.isDirectory) try { it.delete() } catch (_: Exception) { }
+        }
+        return root.createDirectory(name)
     }
 
     private fun writeText(fileName: String, text: String) {
-        val r = root
-        r.findFile(fileName)?.delete()
-        val f = r.createFile("application/json", fileName)
+        deleteIfExists(root, fileName)
+        val f = root.createFile("application/json", fileName)
             ?: error("无法创建 $fileName")
         context.contentResolver.openOutputStream(f.uri, "w")?.use {
             it.write(text.toByteArray(Charsets.UTF_8))
@@ -156,7 +225,7 @@ class ProjectStorage(
     }
 
     private fun writeTextIn(dir: DocumentFile, fileName: String, text: String) {
-        dir.findFile(fileName)?.delete()
+        deleteIfExists(dir, fileName)
         val f = dir.createFile("application/json", fileName)
             ?: error("无法创建 $fileName")
         context.contentResolver.openOutputStream(f.uri, "w")?.use {
